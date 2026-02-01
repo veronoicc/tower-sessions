@@ -1,5 +1,10 @@
 # Unreleased
 
+# 0.15.0
+
+- Update rand to v0.9. #238
+- Fix memory ordering race. #254
+
 # 0.14.0
 
 - Update axum-core to v0.5.0. #231
