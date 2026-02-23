@@ -99,6 +99,7 @@ struct SessionConfig<'a> {
     secure: bool,
     path: Cow<'a, str>,
     domain: Option<Cow<'a, str>>,
+    partitioned: bool,
     always_save: bool,
 }
 
@@ -108,7 +109,8 @@ impl<'a> SessionConfig<'a> {
             .http_only(self.http_only)
             .same_site(self.same_site)
             .secure(self.secure)
-            .path(self.path);
+            .path(self.path)
+            .partitioned(self.partitioned);
 
         cookie_builder = match expiry {
             Some(Expiry::OnInactivity(duration)) => cookie_builder.max_age(duration),
@@ -136,6 +138,7 @@ impl Default for SessionConfig<'_> {
             secure: true,
             path: "/".into(),
             domain: None,
+            partitioned: false,
             always_save: false,
         }
     }
@@ -244,6 +247,7 @@ where
                         if let Some(domain) = session_config.domain {
                             cookie.set_domain(domain);
                         }
+                        cookie.set_partitioned(session_config.partitioned);
 
                         cookie_controller.remove(&cookies, cookie);
                     }
@@ -413,6 +417,26 @@ impl<Store: SessionStore, C: CookieController> SessionManagerLayer<Store, C> {
     /// ```
     pub fn with_domain<D: Into<Cow<'static, str>>>(mut self, domain: D) -> Self {
         self.session_config.domain = Some(domain.into());
+        self
+    }
+
+    /// Configures the `"Partitioned"` attribute of the cookie used for the session.
+    /// The default value is `false`.
+    ///
+    /// Note: Partitioned cookies require the Secure attribute to be set. As such,
+    /// Partitioned cookies are always rendered with the Secure attribute,
+    /// irrespective of the Secure attribute's setting.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use tower_sessions::{MemoryStore, SessionManagerLayer};
+    ///
+    /// let session_store = MemoryStore::default();
+    /// let session_service = SessionManagerLayer::new(session_store).with_partitioned(true);
+    /// ```
+    pub fn with_partitioned(mut self, partitioned: bool) -> Self {
+        self.session_config.partitioned = partitioned;
         self
     }
 
@@ -859,6 +883,22 @@ mod tests {
         assert!(cookie_has_expected_max_age(&res2, expected_max_age));
         assert!(sid1 == sid2);
         assert!(rec1.expiry_date == rec2.expiry_date);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn partitioned_test() -> anyhow::Result<()> {
+        let session_store = MemoryStore::default();
+        let session_layer = SessionManagerLayer::new(session_store).with_partitioned(true);
+        let svc = ServiceBuilder::new()
+            .layer(session_layer)
+            .service_fn(handler);
+
+        let req = Request::builder().body(Body::empty())?;
+        let res = svc.oneshot(req).await?;
+
+        assert!(cookie_value_matches(&res, |s| s.contains("Partitioned")));
 
         Ok(())
     }
